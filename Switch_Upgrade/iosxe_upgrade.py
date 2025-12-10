@@ -1037,7 +1037,27 @@ def run_transfer(conn, args):
     
     # Perform the transfer
     print_section("Transferring Image")
-    return transfer_image(conn, str(image_path), args.dest_path, args.timeout)
+    transfer_success = transfer_image(conn, str(image_path), args.dest_path, args.timeout)
+    
+    # Write memory after successful transfer
+    if transfer_success:
+        print_section("Saving Configuration")
+        logger = get_logger()
+        print("  Running 'write memory'...")
+        logger.info("Running 'write memory' after successful transfer")
+        try:
+            output = conn.send_command("write memory", read_timeout=60)
+            if "OK" in output or "copied" in output.lower():
+                print("  ✓ Configuration saved successfully")
+                logger.info("Configuration saved successfully")
+            else:
+                print(f"  Warning: Unexpected output: {output}")
+                logger.warning(f"Unexpected write memory output: {output}")
+        except Exception as e:
+            print(f"  Warning: write memory failed: {e}")
+            logger.error(f"write memory failed: {e}")
+    
+    return transfer_success
 
 
 # =============================================================================

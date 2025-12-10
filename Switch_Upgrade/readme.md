@@ -77,6 +77,12 @@ chmod +x iosxe_upgrade.py
 
 # Install dependencies
 pip install netmiko
+
+# Optional: For encrypted credentials file support
+pip install cryptography
+
+# Optional: For Excel file support
+pip install openpyxl
 ```
 
 ## Usage
@@ -279,8 +285,9 @@ python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.1
 
 ### Hosts File Format
 
-Create a plain text file with one switch per line:
+The scripts support multiple file formats:
 
+**Text file (.txt)** - One switch per line:
 ```
 # switches.txt
 # Core switches - upgrade first
@@ -290,6 +297,25 @@ Create a plain text file with one switch per line:
 # Access switches
 10.0.0.50
 switch-access-01.example.com
+```
+
+**Excel file (.xlsx)** - First column contains IPs/hostnames:
+| IP Address    | Location   | Model     |
+|---------------|------------|-----------|
+| 192.168.1.10  | Building A | C9300-24P |
+| 192.168.1.11  | Building B | C9300-48P |
+| 10.0.0.50     | Floor 1    | C9200L    |
+
+The script automatically:
+- Reads from the first column only
+- Skips the header row if detected (looks for words like "ip", "host", "switch", "address")
+- Ignores empty cells
+```bash
+# Use Excel file
+python iosxe_upgrade.py --hosts switches.xlsx --image ios.bin --transfer
+
+# Use text file
+python iosxe_upgrade.py --hosts switches.txt --image ios.bin --transfer
 ```
 
 ## Output Example
