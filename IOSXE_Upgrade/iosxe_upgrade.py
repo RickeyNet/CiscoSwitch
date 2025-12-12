@@ -37,10 +37,10 @@ Usage:
     python iosxe_upgrade.py --hosts switches.txt --prestage
 
     # Just transfer image
-    python iosxe_upgrade.py --hosts switches.txt --image cat9k_lite_iosxe.17.13.01.SPA.bin --transfer
+    python iosxe_upgrade.py --hosts switches.txt --image cat9k_lite_iosxe.17.15.04.SPA.bin --transfer
 
     # Just activate (install add/activate/commit with reload)
-    python iosxe_upgrade.py --hosts switches.txt --image cat9k_lite_iosxe.17.13.01.SPA.bin --activate
+    python iosxe_upgrade.py --hosts switches.txt --image cat9k_lite_iosxe.17.15.04.SPA.bin --activate
 """
 
 # =============================================================================
