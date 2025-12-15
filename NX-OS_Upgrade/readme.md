@@ -94,10 +94,10 @@ python nxos_upgrade.py --hosts switches.txt --image nxos64-cs.10.4.1.F.bin --ful
 python nxos_upgrade.py --hosts switches.txt --prestage
 
 # Step 2: Transfer image (during low-usage period)
-python nxos_upgrade.py --hosts switches.txt --image nxos64-cs.10.4.1.F.bin --transfer
+python nxos_upgrade.py --hosts switches.txt --image nxos64-cs.10.2.9.M.bin --transfer
 
 # Step 3: Activate (maintenance window)
-python nxos_upgrade.py --hosts switches.txt --image nxos64-cs.10.4.1.F.bin --activate
+python nxos_upgrade.py --hosts switches.txt --image nxos64-cs.10.2.9.M.bin --activate
 ```
 
 ### Version Check
