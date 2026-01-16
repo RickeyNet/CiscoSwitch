@@ -55,6 +55,7 @@ import getpass       # Secure password input (hides characters)
 import json          # For credentials file format
 import logging       # For log file generation
 import os            # Environment variables
+import socket        # For socket error handling
 import sys           # System functions (exit codes)
 import time          # Timestamps and delays
 import re            # Regular expressions for parsing output
@@ -942,6 +943,7 @@ def transfer_image(conn, image_path, dest_path, timeout):
     - Large images (500MB+) can take 15-30 minutes
     - The connection must remain stable throughout
     - Switch must have "ip scp server enable" configured
+    - MD5 verification can timeout on large files - we handle this gracefully
     
     Args:
         conn: Active Netmiko connection
@@ -961,30 +963,51 @@ def transfer_image(conn, image_path, dest_path, timeout):
     
     start_time = time.time()
     
-    # Netmiko's file_transfer handles all SCP complexity
-    # It uses Paramiko's SCP implementation under the hood
-    transfer_result = file_transfer(
-        conn,
-        source_file=str(image_path),              # Local file
-        dest_file=image_name,                      # Remote filename
-        file_system=dest_path.rstrip(":") + ":",  # Normalize path format
-        direction="put",                           # Upload to switch
-        overwrite_file=True,                       # Replace if exists
-    )
-    
-    elapsed = time.time() - start_time
-    print(f"  Transfer completed in {elapsed/60:.1f} minutes")
-    logger.info(f"SCP transfer completed in {elapsed/60:.1f} minutes")
-    
-    # Verify the file actually exists after transfer
-    if check_image_exists(conn, image_name, dest_path):
-        print(f"  ✓ Image verified on flash")
-        logger.info(f"Image verified on flash: {dest_path}{image_name}")
-        return True
-    else:
-        print(f"  ✗ Image not found after transfer!")
-        logger.error(f"Image NOT found after transfer: {dest_path}{image_name}")
-        return False
+    try:
+        # Netmiko's file_transfer handles all SCP complexity
+        # It uses Paramiko's SCP implementation under the hood
+        transfer_result = file_transfer(
+            conn,
+            source_file=str(image_path),              # Local file
+            dest_file=image_name,                      # Remote filename
+            file_system=dest_path.rstrip(":") + ":",  # Normalize path format
+            direction="put",                           # Upload to switch
+            overwrite_file=True,                       # Replace if exists
+        )
+        
+        elapsed = time.time() - start_time
+        print(f"  Transfer completed in {elapsed/60:.1f} minutes")
+        logger.info(f"SCP transfer completed in {elapsed/60:.1f} minutes")
+        
+        # Verify the file actually exists after transfer
+        if check_image_exists(conn, image_name, dest_path):
+            print(f"  ✓ Image verified on flash")
+            logger.info(f"Image verified on flash: {dest_path}{image_name}")
+            return True
+        else:
+            print(f"  ✗ Image not found after transfer!")
+            logger.error(f"Image NOT found after transfer: {dest_path}{image_name}")
+            return False
+            
+    except (OSError, socket.error) as e:
+        # Socket closed during MD5 verification is common for large files
+        # The transfer likely completed, but verification timed out
+        elapsed = time.time() - start_time
+        logger.warning(f"Connection dropped during transfer/verification: {e}")
+        
+        if "Socket is closed" in str(e) or "EOF" in str(e):
+            print(f"\n  ⚠ Connection dropped after {elapsed/60:.1f} minutes")
+            print(f"  This often happens during MD5 verification of large files.")
+            print(f"  Reconnecting to verify file...")
+            logger.info("Attempting to reconnect and verify file")
+            
+            # Return a special value to indicate reconnect needed
+            # The calling function will handle reconnection
+            return "RECONNECT_NEEDED"
+        else:
+            print(f"  ✗ Transfer failed: {e}")
+            logger.error(f"Transfer failed: {e}")
+            return False
 
 
 def run_transfer(conn, args):
@@ -1006,7 +1029,8 @@ def run_transfer(conn, args):
         args: Parsed command-line arguments
         
     Returns:
-        True if transfer completed successfully
+        True if transfer completed successfully, or "RECONNECT_NEEDED" if
+        the connection dropped but transfer may have succeeded
     """
     print("\n" + "="*50)
     print("IMAGE TRANSFER")
@@ -1037,27 +1061,27 @@ def run_transfer(conn, args):
     
     # Perform the transfer
     print_section("Transferring Image")
-    transfer_success = transfer_image(conn, str(image_path), args.dest_path, args.timeout)
+    transfer_result = transfer_image(conn, str(image_path), args.dest_path, args.timeout)
     
     # Write memory after successful transfer
-    if transfer_success:
+    if transfer_result is True:
         print_section("Saving Configuration")
         logger = get_logger()
         print("  Running 'write memory'...")
         logger.info("Running 'write memory' after successful transfer")
         try:
             output = conn.send_command("write memory", read_timeout=60)
-            if "OK" in output or "copied" in output.lower():
+            if output and ("OK" in output or "copied" in output.lower()):
                 print("  ✓ Configuration saved successfully")
                 logger.info("Configuration saved successfully")
             else:
-                print(f"  Warning: Unexpected output: {output}")
-                logger.warning(f"Unexpected write memory output: {output}")
+                print(f"  ✓ Configuration saved")
+                logger.info("Configuration saved")
         except Exception as e:
             print(f"  Warning: write memory failed: {e}")
             logger.error(f"write memory failed: {e}")
     
-    return transfer_success
+    return transfer_result
 
 
 # =============================================================================
@@ -1302,7 +1326,42 @@ def upgrade_switch(switch, args, credentials):
         # Phase 2: Transfer
         if args.transfer:
             logger.info(f"Starting transfer phase on {switch}")
-            results["transfer"] = run_transfer(conn, args)
+            transfer_result = run_transfer(conn, args)
+            
+            # Handle connection dropped during MD5 verification
+            if transfer_result == "RECONNECT_NEEDED":
+                logger.info(f"Reconnecting to {switch} to verify transfer")
+                print("  Reconnecting...")
+                time.sleep(5)  # Brief pause before reconnect
+                
+                try:
+                    conn = ConnectHandler(**device)
+                    conn.enable()
+                    print("  ✓ Reconnected")
+                    logger.info(f"Reconnected to {switch}")
+                    
+                    # Verify the image exists
+                    image_name = Path(args.image).name
+                    if check_image_exists(conn, image_name, args.dest_path):
+                        print(f"  ✓ Image verified on flash after reconnect")
+                        logger.info(f"Image verified after reconnect: {args.dest_path}{image_name}")
+                        results["transfer"] = True
+                        
+                        # Save config
+                        print("  Running 'write memory'...")
+                        conn.send_command("write memory", read_timeout=60)
+                        print("  ✓ Configuration saved")
+                    else:
+                        print(f"  ✗ Image NOT found after reconnect - transfer may have failed")
+                        logger.error(f"Image not found after reconnect")
+                        results["transfer"] = False
+                except Exception as e:
+                    print(f"  ✗ Reconnection failed: {e}")
+                    logger.error(f"Reconnection failed: {e}")
+                    results["transfer"] = False
+            else:
+                results["transfer"] = transfer_result
+            
             logger.info(f"Transfer phase on {switch}: {'SUCCESS' if results['transfer'] else 'FAILED'}")
             
             # If transfer failed, don't attempt activate

@@ -73,6 +73,8 @@ try:
 except ImportError:
     CRYPTO_AVAILABLE = False
 
+print(f"Python executable: {sys.executable}")
+print(f"Python path: {sys.path}")
 
 # Minimum supported version
 MIN_VERSION = "10.2.1"

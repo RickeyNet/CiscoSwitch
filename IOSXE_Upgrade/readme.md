@@ -50,6 +50,17 @@ The script supports three phases that can be run independently or together:
 
 ## Requirements
 
+!!Use a virtual enviroment when running scripts to aviod python version conflicts
+
+Create the virtual enviroment
+```bash
+py -3.14 -m venv venv
+```
+install packages inside venv
+```bash
+.\venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+```
+
 ### Python Packages
 
 ```bash
@@ -76,13 +87,13 @@ curl -O https://example.com/iosxe_upgrade.py
 chmod +x iosxe_upgrade.py
 
 # Install dependencies
-pip install netmiko
+.\venv\Scripts\python.exe -m pip install netmiko
 
 # Optional: For encrypted credentials file support
-pip install cryptography
+.\venv\Scripts\python.exe -m pip install cryptography
 
 # Optional: For Excel file support
-pip install openpyxl
+.\venv\Scripts\python.exe -m pip install openpyxl
 ```
 
 ## Usage
@@ -241,8 +252,13 @@ batch
 ### Common Workflows
 
 #### Full Upgrade (All Phases)
+9200 lite image:
 ```bash
-python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_lite_iosxe.17.13.01.SPA.bin --full
+.\venv\scripts\python.exe iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_lite_iosxe.17.15.04.SPA.bin --full --no-confirm
+```
+9300 image:
+```bash
+.\venv\scripts\python.exe iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.04.SPA.bin --full
 ```
 
 #### Pre-Stage Only (No Downtime)
@@ -253,6 +269,7 @@ python iosxe_upgrade.py --hosts switches.txt --prestage
 
 #### Transfer Only (Stage Image)
 Push the image during business hours, reload later:
+
 9200 lite image:
 ```bash
 python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_lite_iosxe.17.15.04.SPA.bin --transfer
@@ -263,7 +280,8 @@ python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.1
 ```
 
 #### Activate Only (Maintenance Window)
-Trigger the upgrade when ready:
+Trigger the upgrade when ready: Use --no-confirm on the end if you don't want babysit the reboot for each device.
+
 9200 lite image:
 ```bash
 python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_lite_iosxe.17.15.04.SPA.bin --activate
@@ -274,6 +292,7 @@ python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.1
 ```
 
 #### Transfer + Activate (Back to Back)
+
 9200 lite image:
 ```bash
 python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_lite_iosxe.17.15.04.SPA.bin --transfer --activate

@@ -16,7 +16,7 @@ Usage:
     python iosxe_version_check.py --host 192.168.1.1
 
     # Check multiple switches
-    python iosxe_version_check.py --hosts switches.txt
+    python iosxe_version_check.py --hosts switches.txt 
 
     # Export to CSV
     python iosxe_version_check.py --hosts switches.txt --csv versions.csv
