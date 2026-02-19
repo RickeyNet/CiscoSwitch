@@ -276,7 +276,7 @@ python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_lite_io
 ```
 9300 image:
 ```bash
-python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.04.SPA.bin --transfer
+python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.04b.SPA.bin --transfer
 ```
 
 #### Activate Only (Maintenance Window)
@@ -288,7 +288,7 @@ python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_lite_io
 ```
 9300 image:
 ```bash
-python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.04.SPA.bin --activate
+python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.04b.SPA.bin --activate
 ```
 
 #### Transfer + Activate (Back to Back)
