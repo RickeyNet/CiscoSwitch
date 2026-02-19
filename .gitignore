@@ -3,4 +3,4 @@ logs/
 venv/
 
 # Switch text document containing IP addresses
-**/*.txt
+*.txt
