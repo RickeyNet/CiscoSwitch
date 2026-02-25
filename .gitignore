@@ -2,5 +2,6 @@
 logs/
 venv/
 
-# Switch text document containing IP addresses
-*.txt
+# text documents containining sensitive info
+switches.txt
+interface_template.txt
