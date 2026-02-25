@@ -101,7 +101,7 @@ def get_vlan1_access_ports(connection) -> list[str]:
             access_vlan = None
 
         # Detect operational mode
-        elif "Operational Mode:" in line:
+        elif "Administrative Mode:" in line:
             mode = line.split("Administrative Mode:")[-1].strip().lower()
             is_access = mode == "static access"
 
