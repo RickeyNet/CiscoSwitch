@@ -209,6 +209,7 @@ def process_switch(
             conn.save_config()
 
         logger.info(f"  Finished processing {hostname} ({ip}).")
+        return {"status": "OK", "hostname": hostname, "ports": vlan1_ports}
 
     finally:
         conn.disconnect()
@@ -256,11 +257,44 @@ def main():
             sys.exit(0)
 
     # --- Process each switch ---
+    summary = {}
     for ip in switches:
-        process_switch(ip, username, password, secret, template_commands, dry_run=dry_run)
+        result = process_switch(ip, username, password, secret, template_commands, dry_run=dry_run)
+        summary[ip] = result
 
+    # --- Summary ---
     logger.info(f"\n{'='*60}")
-    logger.info("All switches processed.")
+    logger.info("SUMMARY OF CHANGES")
+    logger.info(f"{'='*60}")
+
+    total_switches = len(summary)
+    total_ports = 0
+    failed_switches = []
+
+    for ip, result in summary.items():
+        if result is None:
+            result = {"status": "UNKNOWN", "hostname": ip, "ports": []}
+        host = result["hostname"]
+        ports = result["ports"]
+        status = result["status"]
+        count = len(ports)
+        total_ports += count
+
+        if status not in ("OK",):
+            failed_switches.append(f"{host} ({ip}): {status}")
+            logger.info(f"  {host} ({ip}): FAILED — {status}")
+        elif count == 0:
+            logger.info(f"  {host} ({ip}): No VLAN 1 access ports found")
+        else:
+            action = "Would change" if dry_run else "Changed"
+            logger.info(f"  {host} ({ip}): {action} {count} port(s) — {', '.join(ports)}")
+
+    logger.info(f"{'─'*60}")
+    logger.info(f"  Total switches processed: {total_switches}")
+    logger.info(f"  Total switches failed:    {len(failed_switches)}")
+    action_word = "to change" if dry_run else "changed"
+    logger.info(f"  Total ports {action_word}:     {total_ports}")
+    logger.info(f"{'='*60}")
     logger.info(f"Log saved to: {log_file}")
 
 
