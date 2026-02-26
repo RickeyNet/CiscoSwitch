@@ -5,3 +5,4 @@ venv/
 # text documents containining sensitive info
 switches.txt
 interface_template.txt
+snmp_template.txt

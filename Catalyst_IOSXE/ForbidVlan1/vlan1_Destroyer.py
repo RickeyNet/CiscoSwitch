@@ -45,7 +45,8 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
-
+logging.getLogger("netmiko").setLevel(logging.WARNING)
+logging.getLogger("paramiko").setLevel(logging.WARNING)
 
 def load_switches(filepath: str) -> list[str]:
     """Read switch IPs/hostnames from a text file (one per line)."""
@@ -163,6 +164,7 @@ def process_switch(
         "secret": secret,
         "timeout": 30,
         "banner_timeout": 30,
+        "verbose": False,
     }
 
     try:
@@ -211,6 +213,9 @@ def process_switch(
         logger.info(f"  Finished processing {hostname} ({ip}).")
         return {"status": "OK", "hostname": hostname, "ports": vlan1_ports}
 
+    except Exception as e:
+        logger.error(f"  Error processing {ip}: {e}")
+        return {"status": f"ERROR: {e}", "hostname": ip, "ports": []}
     finally:
         conn.disconnect()
 
@@ -280,16 +285,16 @@ def main():
         count = len(ports)
         total_ports += count
 
-        if status not in ("OK",):
+        if result is None or status not in ("OK", "UNKNOWN"):
             failed_switches.append(f"{host} ({ip}): {status}")
             logger.info(f"  {host} ({ip}): FAILED — {status}")
         elif count == 0:
-            logger.info(f"  {host} ({ip}): No VLAN 1 access ports found")
+            logger.info(f"  {host} ({ip}): No VLAN 1 access ports detected")
         else:
             action = "Would change" if dry_run else "Changed"
             logger.info(f"  {host} ({ip}): {action} {count} port(s) — {', '.join(ports)}")
 
-    logger.info(f"{'─'*60}")
+    logger.info(f"{'-'*60}")
     logger.info(f"  Total switches processed: {total_switches}")
     logger.info(f"  Total switches failed:    {len(failed_switches)}")
     action_word = "to change" if dry_run else "changed"
