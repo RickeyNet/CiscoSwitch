@@ -6,3 +6,12 @@ venv/
 switches.txt
 interface_template.txt
 snmp_template.txt
+
+# Software
+cat9k*
+
+# Backups
+*backups
+
+# Python bytecode cache
+__pycache__/

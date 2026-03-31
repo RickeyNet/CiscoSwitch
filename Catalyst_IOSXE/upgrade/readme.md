@@ -10,42 +10,64 @@ A Python automation tool for upgrading Cisco Catalyst switches running IOS-XE us
 - **Install mode activation** — Proper `install add/activate/commit` workflow
 - **Batch operations** — Upgrade multiple switches from a list
 - **Interactive confirmations** — Safety prompts before destructive operations
+- **Pre-flight health checks** — CPU, memory, and stack health validation before upgrade
+- **MD5 image verification** — Hash check before and after transfer to catch corruption
+- **Post-upgrade verification** — Waits for switch reboot and confirms new version
+- **Automatic rollback** — Reverts to previous version if post-upgrade check fails
 
 ## Workflow Phases
 
 The script supports three phases that can be run independently or together:
 
 ```
-┌────────────────────────────────────────────────────────────────────┐
-│                         UPGRADE WORKFLOW                           │
-├────────────────────────────────────────────────────────────────────┤
-│                                                                    │
-│  PHASE 1: PRE-STAGE (--prestage)                                   │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │  1. Backup running-config to local file                     │   │
-│  │  2. write memory (save config to startup)                   │   │
-│  │  3. install remove inactive (free up flash space)           │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                              ↓                                     │
-│  PHASE 2: TRANSFER (--transfer)                                    │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │  1. Check flash space                                       │   │
-│  │  2. Transfer image via SCP                                  │   │
-│  │  3. Verify image on flash                                   │   │
-│  │                                                             │   │
-│  │  !!!NO RELOAD - switch continues running current version    │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                              ↓                                     │
-│  PHASE 3: ACTIVATE (--activate)                                    │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │  1. Verify image exists on flash                            │   │
-│  │  2. Run: install add file flash:<image> activate commit     │   │
-│  │  3. Respond 'y' to reload prompt                            │   │
-│  │                                                             │   │
-│  │  !!!TRIGGERS RELOAD - switch reboots with new version       │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                                                                    │
-└────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                          UPGRADE WORKFLOW                            │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  PRE-FLIGHT HEALTH CHECK (automatic, --skip-health-check to skip)   │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  1. CPU utilization (fail if >80%, warn if >60%)             │   │
+│  │  2. Memory utilization (fail if >90%, warn if >80%)          │   │
+│  │  3. Stack member health (fail if any member not "Ready")     │   │
+│  │                                                              │   │
+│  │  If critical issue found → abort upgrade for this switch     │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                              ↓                                      │
+│  PHASE 1: PRE-STAGE (--prestage)                                    │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  1. Backup running-config to local file                      │   │
+│  │  2. write memory (save config to startup)                    │   │
+│  │  3. install remove inactive (free up flash space)            │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                              ↓                                      │
+│  PHASE 2: TRANSFER (--transfer)                                     │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  1. Compute local MD5 hash of image file                     │   │
+│  │  2. Check flash space                                        │   │
+│  │  3. Transfer image via SCP                                   │   │
+│  │  4. Verify MD5 on switch matches local hash                  │   │
+│  │                                                              │   │
+│  │  !!!NO RELOAD - switch continues running current version     │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                              ↓                                      │
+│  PHASE 3: ACTIVATE (--activate)                                     │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  1. Verify image exists on flash                             │   │
+│  │  2. Run: install add file flash:<image> activate commit      │   │
+│  │  3. Respond 'y' to reload prompt                             │   │
+│  │                                                              │   │
+│  │  !!!TRIGGERS RELOAD - switch reboots with new version        │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                              ↓                                      │
+│  POST-UPGRADE VERIFICATION (--verify-upgrade)                       │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  1. Wait for switch to come back online (polls every 30s)    │   │
+│  │  2. Reconnect via SSH                                        │   │
+│  │  3. Run "show version" and compare to expected version       │   │
+│  │  4. If mismatch + --auto-rollback → install rollback         │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Requirements
@@ -126,6 +148,13 @@ Options:
   --skip-backup         Skip config backup during prestage
   --backup-dir DIR      Backup directory (default: ./backups)
   --no-confirm          Skip confirmation prompts
+
+Verification & Safety:
+  --skip-md5            Skip MD5 hash verification during transfer
+  --skip-health-check   Skip pre-flight health checks (CPU, memory, stack)
+  --verify-upgrade      Wait for switch reboot and verify new version after activate
+  --auto-rollback       Auto rollback if version check fails (requires --verify-upgrade)
+  --verify-wait SECS    Max seconds to wait for reboot (default: 1200)
 ```
 ==============================================================================================================================================================
 
@@ -272,11 +301,11 @@ Push the image during business hours, reload later:
 
 9200 lite image:
 ```bash
-python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_lite_iosxe.17.15.04.SPA.bin --transfer
+python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_lite_iosxe.17.15.05.SPA.bin --transfer
 ```
 9300 image:
 ```bash
-python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.04b.SPA.bin --transfer
+python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.05.SPA.bin --transfer
 ```
 
 #### Activate Only (Maintenance Window)
@@ -300,6 +329,36 @@ python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_lite_io
 9300 image:
 ```bash
 python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.04.SPA.bin --transfer --activate
+```
+
+#### Full Upgrade with Verification and Auto-Rollback
+Runs all phases, waits for switch to reboot, verifies the new version, and rolls back automatically if the version doesn't match:
+```bash
+python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.05.SPA.bin --full --verify-upgrade --auto-rollback
+```
+
+#### Activate with Post-Upgrade Verification Only
+Trigger the upgrade and verify it worked (no auto-rollback, just reporting):
+```bash
+python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.05.SPA.bin --activate --verify-upgrade
+```
+
+#### Transfer with MD5 Verification (default)
+MD5 hash is computed locally before transfer and verified on the switch after:
+```bash
+python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.05.SPA.bin --transfer
+```
+
+#### Transfer without MD5 (faster, less safe)
+Skip MD5 if you're in a hurry and trust the network:
+```bash
+python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.05.SPA.bin --transfer --skip-md5
+```
+
+#### Skip Pre-Flight Health Checks
+If you've already validated the switches and want to skip CPU/memory/stack checks:
+```bash
+python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.05.SPA.bin --full --skip-health-check
 ```
 
 ### Hosts File Format
@@ -345,9 +404,13 @@ IOS-XE UPGRADE PLAN
 ============================================================
   Target switches: 2
   Actions:
+    • Pre-flight health check (CPU, memory, stack)
     • Pre-stage (backup, write mem, remove inactive)
-    • Transfer image: cat9k_lite_iosxe.17.13.01.SPA.bin
+    • Transfer image: cat9k_lite_iosxe.17.15.05.SPA.bin
+    • MD5 verification (pre and post transfer)
     • Activate & reload (install add/activate/commit)
+    • Post-upgrade verification (wait for reboot, check version)
+    • Auto-rollback (if version check fails)
 
   ⚠ WARNING: --activate will reload switches!
 
@@ -363,6 +426,14 @@ Proceed with upgrade? (yes/no): yes
   Current Version Info:
     Cisco IOS XE Software, Version 17.09.04a
     Switch uptime is 45 days, 3 hours
+
+  --- Pre-Flight Health Check ---
+  ✓ CPU utilization: 7% (5-min avg)
+  ✓ Memory utilization: 42%
+  ✓ Stack member 1: Ready
+  ✓ Stack member 2: Ready
+
+  ✓ All pre-flight checks passed
 
 ==================================================
 PRE-STAGE TASKS
@@ -385,29 +456,38 @@ PRE-STAGE TASKS
 IMAGE TRANSFER
 ==================================================
 
+  --- Computing Local MD5 Hash ---
+  Hashing local file: 100%
+  Local MD5: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4
+
   --- Checking Prerequisites ---
   Image size: 485.3 MB
   Flash free: 2048.0 MB
   ✓ Sufficient space available
 
   --- Transferring Image ---
-  Starting SCP transfer of cat9k_lite_iosxe.17.13.01.SPA.bin...
+  Starting SCP transfer of cat9k_lite_iosxe.17.15.05.SPA.bin...
   (This may take 10-30 minutes for large images)
   Transfer completed in 12.3 minutes
   ✓ Image verified on flash
+
+  --- Post-Transfer MD5 Verification ---
+  Verifying MD5 on switch (this may take several minutes)...
+  ✓ MD5 verified: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4
+  ✓ Image integrity confirmed after transfer
 
 ==================================================
 ACTIVATE & RELOAD
 ==================================================
 
   --- Verifying Image ---
-  ✓ Image found: flash:cat9k_lite_iosxe.17.13.01.SPA.bin
+  ✓ Image found: flash:cat9k_lite_iosxe.17.15.05.SPA.bin
 
   WARNING: This will reload the switch!
   Proceed with install and reload? (yes/no): yes
 
   --- Running Install Add/Activate/Commit ---
-  Command: install add file flash:cat9k_lite_iosxe.17.13.01.SPA.bin activate commit
+  Command: install add file flash:cat9k_lite_iosxe.17.15.05.SPA.bin activate commit
   This will trigger a reload. Please wait...
   (This process can take 5-15 minutes)
   Install initiated, confirming reload...
@@ -415,8 +495,16 @@ ACTIVATE & RELOAD
   ✓ Install activate commit initiated
   ✓ Reload confirmed - switch is now rebooting
 
-  The switch will be unavailable for 5-15 minutes during upgrade.
-  After reboot, verify with: show version
+  Waiting for 192.168.1.10 to reboot and come back online...
+  (Will check every 30s for up to 20 minutes)
+  Waiting 60s for switch to begin reload...
+  Connection attempt 1 (90s elapsed)...
+  Connection attempt 2 (120s elapsed)...
+  Connection attempt 5 (210s elapsed)...
+  ✓ Switch 192.168.1.10 is back online! (210s total)
+
+  --- Post-Upgrade Version Verification ---
+  ✓ Running version: 17.15.05 (matches expected 17.15.05)
 
 ============================================================
 FINAL SUMMARY
@@ -425,9 +513,76 @@ FINAL SUMMARY
   Successful (1):
     ✓ 192.168.1.10
 
-  Note: Switches that activated are now rebooting.
-  Verify upgrade with: show version
+  Full log saved to: logs/iosxe_upgrade_20250115_143022.log
 ```
+
+## Safety Features
+
+### Pre-Flight Health Checks (automatic)
+
+Before any upgrade operations begin, the script checks the switch's operational health. This runs automatically every time and does not require any flags.
+
+| Check | Warning Threshold | Critical Threshold (aborts upgrade) |
+|-------|-------------------|-------------------------------------|
+| CPU utilization (5-min avg) | > 60% | > 80% |
+| Memory utilization | > 80% | > 90% |
+| Stack member state | — | Any member not in "Ready" state |
+
+If a critical issue is found, the upgrade is aborted for that switch (with an override prompt unless `--no-confirm` is set). Other switches in the batch continue normally.
+
+To skip: `--skip-health-check`
+
+### MD5 Image Verification (automatic during transfer)
+
+During `--transfer`, the script automatically:
+1. Computes the MD5 hash of the local image file before transfer
+2. After SCP completes, runs `verify /md5 flash:<image>` on the switch
+3. Compares both hashes — if they don't match, the transfer is marked as failed
+
+This catches corrupt images, truncated transfers, and bit-rot before you activate a bad image.
+
+If the image already exists on flash, the script verifies its MD5 against the local file. If the hashes match, the transfer is skipped entirely (saving time on re-runs).
+
+To skip: `--skip-md5`
+
+### Post-Upgrade Verification (opt-in)
+
+When `--verify-upgrade` is used with `--activate`, the script will:
+1. Wait for the switch to finish rebooting (polls SSH every 30 seconds)
+2. Reconnect and run `show version`
+3. Compare the running version against the version extracted from the image filename
+4. Report success or failure
+
+The maximum wait time defaults to 20 minutes and can be changed with `--verify-wait`.
+
+```bash
+# Activate and verify
+python iosxe_upgrade.py --hosts switches.txt --image cat9k_iosxe.17.15.05.SPA.bin --activate --verify-upgrade
+
+# Activate and verify with 30-minute wait
+python iosxe_upgrade.py --hosts switches.txt --image cat9k_iosxe.17.15.05.SPA.bin --activate --verify-upgrade --verify-wait 1800
+```
+
+### Automatic Rollback (opt-in)
+
+When `--auto-rollback` is used with `--verify-upgrade`, the script will automatically run `install rollback to committed` if the post-upgrade version check fails. This reverts the switch to whatever version was committed before the activation.
+
+The switch will reload again during rollback.
+
+```bash
+# Full upgrade with safety net
+python iosxe_upgrade.py --hosts switches.txt --image cat9k_iosxe.17.15.05.SPA.bin --full --verify-upgrade --auto-rollback
+```
+
+**When rollback triggers:**
+- Version mismatch detected after reboot
+- Switch comes back on wrong version (e.g., fell back to old image)
+- `install rollback to committed` is executed automatically
+
+**When rollback does NOT trigger:**
+- Switch doesn't come back online (manual intervention needed)
+- Version check succeeds
+- `--auto-rollback` is not specified
 
 ## How the Install Mode Works
 
