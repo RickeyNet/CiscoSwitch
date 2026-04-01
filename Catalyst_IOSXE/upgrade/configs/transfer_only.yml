@@ -1,0 +1,17 @@
+# Transfer Only - Push image to switches without reloading
+# Good for staging the image ahead of a maintenance window.
+# No reload, no config changes beyond write mem after transfer.
+#
+# Usage:
+#   python iosxe_upgrade.py --config configs/transfer_only.yml
+#   python iosxe_upgrade.py --config configs/transfer_only.yml --image ciscosoftware/cat9k_lite_iosxe.17.15.05.SPA.bin
+
+hosts: switches.txt
+image: ciscosoftware/cat9k_iosxe.17.15.05.SPA.bin
+transfer: true
+
+parallel: 10
+no_confirm: true
+retries: 2
+timeout: 900
+output: results_transfer.json

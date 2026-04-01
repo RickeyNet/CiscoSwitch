@@ -53,6 +53,12 @@ Usage:
 
     # Sequential with delay between switches to reduce infrastructure load
     python iosxe_upgrade.py --hosts switches.txt --image cat9k_lite_iosxe.17.15.04.SPA.bin --full --delay 30
+
+    # Use a config file (YAML or JSON) for common settings
+    python iosxe_upgrade.py --config upgrade_config.yml
+
+    # Config file with CLI overrides
+    python iosxe_upgrade.py --config upgrade_config.yml --timeout 1200
 """
 
 # =============================================================================
@@ -87,6 +93,13 @@ try:
 except ImportError:
     CRYPTO_AVAILABLE = False
 
+# Optional: PyYAML for config file support
+try:
+    import yaml  # pyright: ignore[reportMissingModuleSource]
+    YAML_AVAILABLE = True
+except ImportError:
+    YAML_AVAILABLE = False
+
 # Optional: openpyxl for Excel file support
 try:
     from openpyxl import load_workbook # pyright: ignore[reportMissingModuleSource]
@@ -102,6 +115,244 @@ try:
 except ImportError:
     print("Error: netmiko not installed. Run: pip install netmiko")
     sys.exit(1)
+
+
+# =============================================================================
+# CONFIG FILE SUPPORT
+# =============================================================================
+
+# Maps config file keys to argparse dest names.
+# Only keys listed here are accepted in config files, preventing typos
+# from silently being ignored.
+CONFIG_KEY_MAP = {
+    # Targets
+    "host": "host",
+    "hosts": "hosts",
+    "image": "image",
+    # Actions
+    "prestage": "prestage",
+    "transfer": "transfer",
+    "activate": "activate",
+    "full": "full",
+    # Authentication
+    "username": "username",
+    "password": "password",
+    "enable": "enable",
+    "creds_file": "creds_file",
+    "env_creds": "env_creds",
+    # Connection
+    "port": "port",
+    "dest_path": "dest_path",
+    "timeout": "timeout",
+    "parallel": "parallel",
+    "retries": "retries",
+    "delay": "delay",
+    # Behavior modifiers
+    "skip_backup": "skip_backup",
+    "backup_dir": "backup_dir",
+    "no_confirm": "no_confirm",
+    # Verification
+    "skip_md5": "skip_md5",
+    "skip_health_check": "skip_health_check",
+    "verify_upgrade": "verify_upgrade",
+    "auto_rollback": "auto_rollback",
+    "verify_wait": "verify_wait",
+    # Logging / output
+    "log_dir": "log_dir",
+    "log_level": "log_level",
+    "no_log": "no_log",
+    "output": "output",
+    "image_map": "image_map",
+}
+
+
+def load_config_file(config_path):
+    """
+    Load settings from a YAML or JSON config file.
+
+    Supports both .yml/.yaml (requires PyYAML) and .json files.
+    Returns a dict of validated key-value pairs that map to argparse dest names.
+
+    Raises:
+        SystemExit: If the file can't be read, parsed, or contains unknown keys.
+    """
+    config_path = Path(config_path)
+
+    if not config_path.is_file():
+        print(f"Error: Config file not found: {config_path}")
+        sys.exit(1)
+
+    ext = config_path.suffix.lower()
+    raw_text = config_path.read_text(encoding="utf-8")
+
+    if ext in (".yml", ".yaml"):
+        if not YAML_AVAILABLE:
+            print("Error: PyYAML is required for YAML config files. Run: pip install pyyaml")
+            sys.exit(1)
+        try:
+            data = yaml.safe_load(raw_text)
+        except yaml.YAMLError as e:
+            print(f"Error: Failed to parse YAML config: {e}")
+            sys.exit(1)
+    elif ext == ".json":
+        try:
+            data = json.loads(raw_text)
+        except json.JSONDecodeError as e:
+            print(f"Error: Failed to parse JSON config: {e}")
+            sys.exit(1)
+    else:
+        print(f"Error: Unsupported config file format '{ext}'. Use .yml, .yaml, or .json")
+        sys.exit(1)
+
+    if not isinstance(data, dict):
+        print(f"Error: Config file must contain a mapping (key: value), not {type(data).__name__}")
+        sys.exit(1)
+
+    # Validate keys and map to argparse dest names
+    result = {}
+    unknown = []
+    for key, value in data.items():
+        # Normalize hyphens to underscores (accept either style)
+        normalized = key.replace("-", "_")
+        if normalized in CONFIG_KEY_MAP:
+            result[CONFIG_KEY_MAP[normalized]] = value
+        else:
+            unknown.append(key)
+
+    if unknown:
+        print(f"Error: Unknown keys in config file: {', '.join(unknown)}")
+        print(f"  Valid keys: {', '.join(sorted(CONFIG_KEY_MAP.keys()))}")
+        sys.exit(1)
+
+    return result
+
+
+# =============================================================================
+# IMAGE MAP SUPPORT
+# =============================================================================
+
+def load_image_map(map_path):
+    """
+    Load a model-to-image mapping from a YAML or JSON file.
+
+    The file should be a dict mapping model pattern substrings to image paths.
+    Example:
+        "9200": ciscosoftware/cat9k_lite_iosxe.17.15.05.SPA.bin
+        "9300": ciscosoftware/cat9k_iosxe.17.15.05.SPA.bin
+
+    Patterns are matched case-insensitively against the switch model string
+    from 'show version'. More specific patterns (longer strings) are checked
+    first so "C9200L" would match before "9200" if both are present.
+
+    Returns:
+        List of (pattern, image_path) tuples sorted by pattern length descending
+    """
+    map_path = Path(map_path)
+
+    if not map_path.is_file():
+        print(f"Error: Image map file not found: {map_path}")
+        sys.exit(1)
+
+    ext = map_path.suffix.lower()
+    raw_text = map_path.read_text(encoding="utf-8")
+
+    if ext in (".yml", ".yaml"):
+        if not YAML_AVAILABLE:
+            print("Error: PyYAML is required for YAML image map files. Run: pip install pyyaml")
+            sys.exit(1)
+        try:
+            data = yaml.safe_load(raw_text)
+        except yaml.YAMLError as e:
+            print(f"Error: Failed to parse YAML image map: {e}")
+            sys.exit(1)
+    elif ext == ".json":
+        try:
+            data = json.loads(raw_text)
+        except json.JSONDecodeError as e:
+            print(f"Error: Failed to parse JSON image map: {e}")
+            sys.exit(1)
+    else:
+        print(f"Error: Unsupported image map format '{ext}'. Use .yml, .yaml, or .json")
+        sys.exit(1)
+
+    if not isinstance(data, dict) or not data:
+        print(f"Error: Image map must be a non-empty mapping of model patterns to image paths")
+        sys.exit(1)
+
+    # Validate that all image files exist
+    for pattern, image_path in data.items():
+        if not isinstance(image_path, str):
+            print(f"Error: Image path for pattern '{pattern}' must be a string, got {type(image_path).__name__}")
+            sys.exit(1)
+        if not Path(image_path).exists():
+            print(f"Error: Image file not found for pattern '{pattern}': {image_path}")
+            sys.exit(1)
+
+    # Sort by pattern length descending so more specific patterns match first
+    entries = sorted(data.items(), key=lambda x: len(str(x[0])), reverse=True)
+    return [(str(pattern).upper(), image_path) for pattern, image_path in entries]
+
+
+def resolve_image_for_switch(conn, image_map, switch):
+    """
+    Detect the switch model and resolve the correct image from the image map.
+
+    Parses 'show version' output to find the model identifier, then matches
+    it against the image map patterns.
+
+    Args:
+        conn: Active Netmiko connection
+        image_map: List of (pattern, image_path) tuples from load_image_map()
+        switch: Switch hostname/IP (for logging)
+
+    Returns:
+        Tuple of (model_string, image_path) on success, or (None, None) if
+        no pattern matched.
+    """
+    logger = get_logger()
+
+    # Get full show version to extract model
+    output = conn.send_command("show version")
+    if not output:
+        logger.error(f"Empty 'show version' output on {switch}")
+        return None, None
+
+    # Look for model in common show version patterns:
+    #   "cisco C9200L-24P-4G (ARM) processor..."
+    #   "cisco C9300-48P (X86) processor..."
+    #   "Model Number                          : C9200L-24P-4G"
+    model = None
+    for line in output.splitlines():
+        # Match "cisco C9xxx" processor line
+        match = re.search(r'cisco\s+(C\S+)\s+\(', line, re.IGNORECASE)
+        if match:
+            model = match.group(1).upper()
+            break
+        # Match "Model Number" line (some platforms)
+        match = re.search(r'Model\s+Number\s*:\s*(\S+)', line, re.IGNORECASE)
+        if match:
+            model = match.group(1).upper()
+            break
+
+    if not model:
+        logger.error(f"Could not detect model from 'show version' on {switch}")
+        print(f"  ✗ Could not detect switch model on {switch}")
+        return None, None
+
+    logger.info(f"Detected model on {switch}: {model}")
+    print(f"  Detected model: {model}")
+
+    # Match against image map (patterns already sorted by specificity)
+    for pattern, image_path in image_map:
+        if pattern in model:
+            logger.info(f"Model {model} matched pattern '{pattern}' -> {image_path}")
+            print(f"  Matched pattern '{pattern}' -> {Path(image_path).name}")
+            return model, image_path
+
+    logger.error(f"No image map match for model {model} on {switch}")
+    print(f"  ✗ No image map entry matches model '{model}'")
+    print(f"  Available patterns: {', '.join(p for p, _ in image_map)}")
+    return model, None
 
 
 # =============================================================================
@@ -165,9 +416,25 @@ Examples:
 
   # Save results as CSV
   python iosxe_upgrade.py --hosts switches.txt --image ios.bin --full --output results.csv
+
+  # Use a config file for common settings
+  python iosxe_upgrade.py --config upgrade_config.yml
+
+  # Config file with CLI overrides (CLI wins)
+  python iosxe_upgrade.py --config upgrade_config.yml --timeout 1200 --retries 3
+
+  # Mixed-model batch upgrade (9200s get lite image, 9300s get full image)
+  python iosxe_upgrade.py --hosts switches.txt --image-map image_map.yml --full --no-confirm
         """
     )
     
+    # -------------------------------------------------------------------------
+    # Config file - load defaults from YAML or JSON
+    # -------------------------------------------------------------------------
+    parser.add_argument("--config", metavar="FILE",
+        help="Load settings from a YAML or JSON config file. CLI arguments "
+             "override config file values. Example: --config upgrade_config.yml")
+
     # -------------------------------------------------------------------------
     # Target switches - must specify exactly one (unless creating creds file)
     # -------------------------------------------------------------------------
@@ -177,6 +444,10 @@ Examples:
     
     # Image file - needed for transfer and activate phases
     parser.add_argument("--image", help="Path to IOS-XE image file")
+    parser.add_argument("--image-map", metavar="FILE",
+        help="YAML or JSON file mapping model patterns to image paths. "
+             "Allows mixed-model upgrades (e.g., 9200 lite + 9300 full). "
+             "Use instead of --image when upgrading different switch models.")
     
     # -------------------------------------------------------------------------
     # Workflow actions - the core of the script's flexibility
@@ -267,11 +538,29 @@ Examples:
              "(detected by extension). Example: --output results.json")
     
     args = parser.parse_args()
-    
+
+    # -------------------------------------------------------------------------
+    # Apply config file defaults (CLI args take precedence)
+    # -------------------------------------------------------------------------
+    if args.config:
+        config = load_config_file(args.config)
+        # Get parser defaults so we can tell which args were explicitly set
+        defaults = {k: v for k, v in vars(parser.parse_args([])).items()}
+        for key, value in config.items():
+            # Only apply config value if the CLI arg was not explicitly provided
+            # (i.e., it still has its default value and is not a boolean that was
+            # explicitly set to True via a store_true flag on the CLI)
+            current = getattr(args, key, None)
+            default = defaults.get(key)
+            if current == default:
+                setattr(args, key, value)
+
+        print(f"  Loaded config from: {args.config}")
+
     # -------------------------------------------------------------------------
     # Post-parsing validation and normalization
     # -------------------------------------------------------------------------
-    
+
     # --create-creds is a standalone operation, skip other validation
     if args.create_creds:
         return args
@@ -290,9 +579,13 @@ Examples:
     if not any([args.prestage, args.transfer, args.activate]):
         parser.error("Must specify at least one action: --prestage, --transfer, --activate, or --full")
     
-    # --image is required for transfer and activate
-    if (args.transfer or args.activate) and not args.image:
-        parser.error("--image is required for --transfer and --activate actions")
+    # --image or --image-map is required for transfer and activate
+    if (args.transfer or args.activate) and not args.image and not args.image_map:
+        parser.error("--image or --image-map is required for --transfer and --activate actions")
+
+    # --image and --image-map are mutually exclusive
+    if args.image and args.image_map:
+        parser.error("--image and --image-map are mutually exclusive (use one or the other)")
 
     # --auto-rollback requires --verify-upgrade
     if args.auto_rollback and not args.verify_upgrade:
@@ -1936,6 +2229,21 @@ def upgrade_switch(switch, args, credentials):
             logger.info(f"Current version on {switch}: {version_output.splitlines()[0] if version_output else 'Unknown'}") # pyright: ignore[reportAttributeAccessIssue]
 
         # =====================================================================
+        # Image map resolution (if --image-map is used)
+        # =====================================================================
+        if args.image_map and not args.image:
+            # Make a per-switch copy so we don't mutate shared args
+            args = copy.copy(args)
+            model, resolved_image = resolve_image_for_switch(conn, args.image_map, switch)
+            if resolved_image is None:
+                print(f"\n  ✗ Cannot determine image for {switch} — skipping all phases")
+                logger.error(f"No image map match for {switch} (model: {model})")
+                conn.disconnect()
+                return False, results
+            args.image = resolved_image
+            logger.info(f"Image map resolved {switch} (model: {model}) -> {resolved_image}")
+
+        # =====================================================================
         # Pre-flight health check (unless skipped)
         # =====================================================================
         if not args.skip_health_check:
@@ -2084,6 +2392,9 @@ def upgrade_switch(switch, args, credentials):
         completed_phases = [v for v in results.values() if v is not None]
         success = all(v for v in completed_phases) if completed_phases else False
 
+        # Store the resolved image path for structured output
+        results["image"] = args.image
+
         logger.info(f"Switch {switch} overall result: {'SUCCESS' if success else 'FAILED'}")
         return success, results
 
@@ -2115,12 +2426,19 @@ def write_results_output(output_path, all_results, args):
     ext = output_path.suffix.lower()
 
     timestamp = datetime.now().isoformat()
-    image_name = Path(args.image).name if args.image else None
+    default_image = Path(args.image).name if args.image else None
 
     # Build a list of per-switch result records
     records = []
     for switch, result in all_results.items():
         phases = result.get("phases", {})
+        # Use per-switch resolved image if available (from --image-map),
+        # otherwise fall back to --image
+        per_switch_image = phases.get("image")
+        if per_switch_image:
+            resolved_name = Path(per_switch_image).name
+        else:
+            resolved_name = default_image
         records.append({
             "switch": switch,
             "success": result.get("success", False),
@@ -2129,7 +2447,7 @@ def write_results_output(output_path, all_results, args):
             "transfer": phases.get("transfer"),
             "activate": phases.get("activate"),
             "verify": phases.get("verify"),
-            "image": image_name,
+            "image": resolved_name,
             "timestamp": timestamp,
         })
 
@@ -2196,13 +2514,21 @@ def main():
     
     # Get switch list
     switches = get_switches(args)
-    
+
+    # Load image map if specified (replaces file path with parsed map data)
+    if args.image_map:
+        args.image_map = load_image_map(args.image_map)
+
     # Log the upgrade plan
     logger.info(f"Target switches: {len(switches)}")
     logger.info(f"Actions: prestage={args.prestage}, transfer={args.transfer}, activate={args.activate}")
     if args.image:
         logger.info(f"Image file: {args.image}")
-    
+    if args.image_map:
+        logger.info(f"Image map: {len(args.image_map)} entries")
+        for pattern, img in args.image_map:
+            logger.info(f"  {pattern} -> {img}")
+
     # Display the upgrade plan
     print("\n" + "="*60)
     print("IOS-XE UPGRADE PLAN")
@@ -2214,7 +2540,12 @@ def main():
     if args.prestage:
         print("    • Pre-stage (backup, write mem, remove inactive)")
     if args.transfer:
-        print(f"    • Transfer image: {args.image}")
+        if args.image:
+            print(f"    • Transfer image: {args.image}")
+        elif args.image_map:
+            print(f"    • Transfer image (auto-detect by model):")
+            for pattern, img in args.image_map:
+                print(f"      {pattern} → {Path(img).name}")
         if not args.skip_md5:
             print("    • MD5 verification (pre and post transfer)")
     if args.activate:

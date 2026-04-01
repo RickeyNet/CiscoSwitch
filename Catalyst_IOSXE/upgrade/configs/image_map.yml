@@ -1,0 +1,17 @@
+# Image Map - Maps switch model patterns to IOS-XE image files
+#
+# The script detects the switch model from 'show version' output and matches
+# it against these patterns. More specific patterns (longer strings) are
+# checked first, so "C9200L" would match before "9200" if both are present.
+#
+# Pattern matching is case-insensitive and checks if the pattern appears
+# anywhere in the model string (e.g., "9200" matches "C9200L-24P-4G").
+#
+# Usage:
+#   python iosxe_upgrade.py --hosts switches.txt --image-map configs/image_map.yml --full --no-confirm
+
+# Catalyst 9200/9200L — uses the "lite" IOS-XE image
+"9200": ciscosoftware/cat9k_lite_iosxe.17.15.05.SPA.bin
+
+# Catalyst 9300 — uses the full IOS-XE image
+"9300": ciscosoftware/cat9k_iosxe.17.15.05.SPA.bin

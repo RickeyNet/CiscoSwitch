@@ -1,0 +1,14 @@
+# Prestage Only - Safe to run during business hours
+# Backs up configs, writes memory, cleans inactive images.
+# No reload, no image transfer. Zero impact to production.
+#
+# Usage:
+#   python iosxe_upgrade.py --config configs/prestage_only.yml
+#   python iosxe_upgrade.py --config configs/prestage_only.yml --host 10.10.77.4
+
+hosts: switches.txt
+prestage: true
+
+backup_dir: ./backups
+parallel: 10
+no_confirm: true

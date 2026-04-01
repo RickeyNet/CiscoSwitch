@@ -30,15 +30,22 @@ Potential improvements identified during code review. Items are grouped by categ
 
 **Implemented:** Added `--parallel N` flag (default: 1). When `N > 1`, prestage and transfer run across switches concurrently using `ThreadPoolExecutor`. Activate always runs sequentially for safety. Requires `--no-confirm` in parallel mode.
 
-### [ ] Config File Support
-Everything is via CLI arguments currently. A YAML or JSON config file for common settings (timeouts, image paths, credential file paths, parallel workers, default flags) would reduce long command lines and support repeatable deployments. Example:
+### [x] ~~Config File Support~~
+~~Everything is via CLI arguments currently. A YAML or JSON config file for common settings (timeouts, image paths, credential file paths, parallel workers, default flags) would reduce long command lines and support repeatable deployments.~~
+
+**Implemented:** Added `--config FILE` flag that loads settings from a YAML (`.yml`/`.yaml`, requires PyYAML) or JSON (`.json`) config file. All CLI arguments can be specified as config keys (using underscores). CLI arguments always override config file values. Unknown keys are rejected with an error. Example:
 ```yaml
 # upgrade_config.yml
-image: ciscosoftware/cat9k_iosxe.17.15.05.SPA.bin
 hosts: switches.txt
+image: cat9k_iosxe.17.15.05.SPA.bin
+full: true
 timeout: 900
+parallel: 10
+no_confirm: true
+retries: 2
 verify_upgrade: true
 auto_rollback: true
+output: results.json
 ```
 
 ### [x] ~~Structured Result Output~~

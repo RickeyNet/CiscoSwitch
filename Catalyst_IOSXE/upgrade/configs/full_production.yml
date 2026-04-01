@@ -1,0 +1,24 @@
+# Full Production Upgrade - All phases with safety nets
+# Prestage + transfer run in parallel, activate runs sequentially.
+# Includes retries, verification, auto-rollback, and result output.
+#
+# Usage:
+#   python iosxe_upgrade.py --config configs/full_production.yml
+#   python iosxe_upgrade.py --config configs/full_production.yml --hosts other_switches.txt
+
+hosts: switches.txt
+image: ciscosoftware/cat9k_iosxe.17.15.05.SPA.bin
+full: true
+
+parallel: 10
+no_confirm: true
+retries: 2
+delay: 30
+timeout: 900
+
+verify_upgrade: true
+auto_rollback: true
+verify_wait: 1200
+
+backup_dir: ./backups
+output: results.json

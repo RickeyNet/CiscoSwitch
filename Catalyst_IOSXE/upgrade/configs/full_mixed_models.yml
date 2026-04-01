@@ -1,0 +1,24 @@
+# Full Mixed-Model Upgrade - Auto-detect 9200 vs 9300 images
+# Uses --image-map to automatically select the correct image per switch
+# based on the model detected from 'show version'.
+#
+# Usage:
+#   python iosxe_upgrade.py --config configs/full_mixed_models.yml
+#   python iosxe_upgrade.py --config configs/full_mixed_models.yml --hosts other_switches.txt
+
+hosts: switches.txt
+image_map: configs/image_map.yml
+full: true
+
+parallel: 10
+no_confirm: true
+retries: 2
+delay: 30
+timeout: 900
+
+verify_upgrade: true
+auto_rollback: true
+verify_wait: 1200
+
+backup_dir: ./backups
+output: results.json

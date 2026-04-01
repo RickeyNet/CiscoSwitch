@@ -14,6 +14,9 @@ A Python automation tool for upgrading Cisco Catalyst switches running IOS-XE us
 - **MD5 image verification** — Hash check before and after transfer to catch corruption
 - **Post-upgrade verification** — Waits for switch reboot and confirms new version
 - **Automatic rollback** — Reverts to previous version if post-upgrade check fails
+- **Mixed-model image map** — Auto-detect switch model and use the correct image (e.g., 9200 lite vs 9300 full)
+- **Config file support** — YAML or JSON config files for repeatable deployments
+- **Structured result output** — Export results as JSON or CSV for dashboards and ticketing
 
 ## Workflow Phases
 
@@ -114,6 +117,9 @@ chmod +x iosxe_upgrade.py
 # Optional: For encrypted credentials file support
 .\venv\Scripts\python.exe -m pip install cryptography
 
+# Optional: For YAML config file support
+.\venv\Scripts\python.exe -m pip install pyyaml
+
 # Optional: For Excel file support
 .\venv\Scripts\python.exe -m pip install openpyxl
 ```
@@ -133,8 +139,9 @@ Actions (at least one required):
   --activate            Run install add/activate/commit (triggers reload)
   --full                Run all phases: prestage → transfer → activate
 
-Image (required for --transfer and --activate):
-  --image FILE          Path to IOS-XE image file
+Image (one required for --transfer and --activate):
+  --image FILE          Path to IOS-XE image file (single model)
+  --image-map FILE      YAML/JSON mapping model patterns to images (mixed models)
 
 Authentication:
   -u, --username        SSH username
@@ -145,9 +152,16 @@ Options:
   --port PORT           SSH port (default: 22)
   --dest-path PATH      Destination filesystem (default: flash:)
   --timeout SECONDS     Command timeout (default: 600)
+  --parallel N          Parallel workers for prestage/transfer (default: 1)
+  --retries N           Retry attempts for SCP/SSH on failure (default: 0)
+  --delay N             Seconds to wait between switches (default: 0)
   --skip-backup         Skip config backup during prestage
   --backup-dir DIR      Backup directory (default: ./backups)
   --no-confirm          Skip confirmation prompts
+
+Config & Output:
+  --config FILE         Load settings from a YAML or JSON config file (CLI overrides)
+  --output FILE         Write results to JSON or CSV (detected by extension)
 
 Verification & Safety:
   --skip-md5            Skip MD5 hash verification during transfer
@@ -331,6 +345,16 @@ python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_lite_io
 python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.04.SPA.bin --transfer --activate
 ```
 
+#### Mixed-Model Batch Upgrade (9200 + 9300)
+Upgrade a mix of switch models in one run — the script auto-detects the model and uses the right image:
+```bash
+python iosxe_upgrade.py --hosts switches.txt --image-map configs/image_map.yml --full --no-confirm
+```
+Or with the config preset:
+```bash
+python iosxe_upgrade.py --config configs/full_mixed_models.yml
+```
+
 #### Full Upgrade with Verification and Auto-Rollback
 Runs all phases, waits for switch to reboot, verifies the new version, and rolls back automatically if the version doesn't match:
 ```bash
@@ -360,6 +384,215 @@ If you've already validated the switches and want to skip CPU/memory/stack check
 ```bash
 python iosxe_upgrade.py --hosts switches.txt --image ciscosoftware\cat9k_iosxe.17.15.05.SPA.bin --full --skip-health-check
 ```
+
+#### Using Config Files
+Instead of typing long command lines, use a config file:
+```bash
+# Run everything from a config file
+python iosxe_upgrade.py --config configs/full_production.yml
+
+# Config file with CLI overrides (CLI always wins)
+python iosxe_upgrade.py --config configs/full_production.yml --timeout 1200 --retries 5
+
+# Phased workflow using config files
+python iosxe_upgrade.py --config configs/prestage_only.yml
+python iosxe_upgrade.py --config configs/transfer_only.yml
+python iosxe_upgrade.py --config configs/activate_only.yml
+```
+
+### Config File Support
+
+The `--config` flag loads settings from a YAML (`.yml`/`.yaml`) or JSON (`.json`) file. Any CLI argument can also be set as a config key. CLI arguments always override config file values.
+
+**Requirements:** YAML configs require `pip install pyyaml`. JSON configs work out of the box.
+
+#### Config File Format
+
+Use underscores for key names (hyphens are also accepted):
+
+```yaml
+# upgrade_config.yml
+hosts: switches.txt
+image: ciscosoftware/cat9k_iosxe.17.15.05.SPA.bin
+full: true
+
+timeout: 900
+parallel: 10
+no_confirm: true
+retries: 2
+delay: 30
+
+verify_upgrade: true
+auto_rollback: true
+verify_wait: 1200
+
+backup_dir: ./backups
+output: results.json
+```
+
+#### Available Config Keys
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `host` | string | — | Single switch IP or hostname |
+| `hosts` | string | — | Path to hosts file |
+| `image` | string | — | Path to IOS-XE image (single model) |
+| `image_map` | string | — | Path to image map file (mixed models) |
+| `prestage` | bool | false | Run prestage phase |
+| `transfer` | bool | false | Run transfer phase |
+| `activate` | bool | false | Run activate phase |
+| `full` | bool | false | Run all phases |
+| `username` | string | — | SSH username |
+| `password` | string | — | SSH password |
+| `enable` | string | — | Enable password |
+| `creds_file` | string | — | Path to encrypted credentials file |
+| `env_creds` | bool | false | Use environment variable credentials |
+| `port` | int | 22 | SSH port |
+| `dest_path` | string | flash: | Destination filesystem |
+| `timeout` | int | 600 | Command timeout (seconds) |
+| `parallel` | int | 1 | Parallel workers for prestage/transfer |
+| `retries` | int | 0 | Retry attempts on transient failures |
+| `delay` | int | 0 | Seconds between switches |
+| `skip_backup` | bool | false | Skip config backup |
+| `backup_dir` | string | ./backups | Backup directory |
+| `no_confirm` | bool | false | Skip confirmation prompts |
+| `skip_md5` | bool | false | Skip MD5 verification |
+| `skip_health_check` | bool | false | Skip health checks |
+| `verify_upgrade` | bool | false | Verify version after reboot |
+| `auto_rollback` | bool | false | Rollback on version mismatch |
+| `verify_wait` | int | 1200 | Max reboot wait (seconds) |
+| `log_dir` | string | ./logs | Log directory |
+| `log_level` | string | DEBUG | Log level |
+| `no_log` | bool | false | Disable logging |
+| `output` | string | — | Result output file (.json or .csv) |
+
+Unknown keys are rejected with an error, preventing typos from being silently ignored.
+
+#### Included Config Presets
+
+The `configs/` directory includes ready-to-use presets:
+
+| Config | Purpose | Reload? |
+|--------|---------|---------|
+| `prestage_only.yml` | Backup + cleanup during business hours | No |
+| `transfer_only.yml` | Push images ahead of maintenance window | No |
+| `activate_only.yml` | Trigger upgrade with verify + rollback | Yes |
+| `full_production.yml` | All phases with all safety nets | Yes |
+| `full_mixed_models.yml` | All phases with auto model detection (9200/9300) | Yes |
+| `lab_quick.yml` | Fast lab testing, skips all checks | Yes |
+| `image_map.yml` | Model-to-image mapping (used by `--image-map`) | — |
+
+The first three support a **phased workflow**: run `prestage_only` during the day, `transfer_only` in the evening, then `activate_only` during the maintenance window.
+
+### Mixed-Model Image Map
+
+The `--image-map` flag lets you upgrade a mix of switch models in a single batch. Instead of specifying one `--image`, you provide a YAML or JSON file that maps model patterns to image paths. The script detects each switch's model from `show version` and picks the right image automatically.
+
+```bash
+# Upgrade a mixed batch of 9200s and 9300s
+python iosxe_upgrade.py --hosts switches.txt --image-map configs/image_map.yml --full --no-confirm
+
+# Or use the included config preset
+python iosxe_upgrade.py --config configs/full_mixed_models.yml
+```
+
+#### Image Map Format
+
+```yaml
+# image_map.yml
+"9200": ciscosoftware/cat9k_lite_iosxe.17.15.05.SPA.bin
+"9300": ciscosoftware/cat9k_iosxe.17.15.05.SPA.bin
+```
+
+Keys are model pattern substrings matched case-insensitively against the full model string from `show version` (e.g., `C9200L-24P-4G`). More specific patterns (longer strings) are checked first, so `C9200L` would match before `9200` if both are present.
+
+#### How It Works
+
+1. Script connects to the switch and runs `show version`
+2. Model is extracted (e.g., `C9200L-24P-4G`, `C9300-48P`)
+3. Model is matched against image map patterns
+4. The matched image is used for that switch's transfer and activate phases
+
+If no pattern matches, the switch is skipped with an error.
+
+#### Example Output
+
+```
+############################################################
+# SWITCH: 10.10.77.4
+############################################################
+
+  Connecting to 10.10.77.4...
+  ✓ Connected and in enable mode
+
+  Current Version Info:
+    Cisco IOS XE Software, Version 17.09.04a
+
+  Detected model: C9200L-24P-4G
+  Matched pattern '9200' -> cat9k_lite_iosxe.17.15.05.SPA.bin
+```
+
+`--image-map` is mutually exclusive with `--image`. It can also be specified in config files as `image_map`.
+
+### Structured Result Output
+
+The `--output` flag writes per-switch upgrade results to a file. Format is auto-detected by extension:
+
+- **`.json`** — JSON array of result objects
+- **`.csv`** — One row per switch with column headers
+
+```bash
+# JSON output
+python iosxe_upgrade.py --hosts switches.txt --image ios.bin --full --output results.json
+
+# CSV output
+python iosxe_upgrade.py --hosts switches.txt --image ios.bin --full --output results.csv
+```
+
+#### Output Fields
+
+| Field | Description |
+|-------|-------------|
+| `switch` | Hostname or IP address |
+| `success` | Overall pass/fail (true/false) |
+| `health_check` | Phase result (true/false/null if not run) |
+| `prestage` | Phase result |
+| `transfer` | Phase result |
+| `activate` | Phase result |
+| `verify` | Phase result |
+| `image` | Image filename |
+| `timestamp` | ISO 8601 timestamp |
+
+#### Example JSON Output
+
+```json
+[
+  {
+    "switch": "10.10.77.4",
+    "success": true,
+    "health_check": true,
+    "prestage": true,
+    "transfer": true,
+    "activate": true,
+    "verify": true,
+    "image": "cat9k_iosxe.17.15.05.SPA.bin",
+    "timestamp": "2025-03-15T02:30:00.123456"
+  },
+  {
+    "switch": "10.10.77.123",
+    "success": false,
+    "health_check": true,
+    "prestage": true,
+    "transfer": false,
+    "activate": null,
+    "verify": null,
+    "image": "cat9k_iosxe.17.15.05.SPA.bin",
+    "timestamp": "2025-03-15T02:30:00.123456"
+  }
+]
+```
+
+This enables integration with monitoring tools, ServiceNow tickets, or custom dashboards.
 
 ### Hosts File Format
 

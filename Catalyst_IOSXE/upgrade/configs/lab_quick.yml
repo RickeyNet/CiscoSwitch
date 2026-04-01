@@ -1,0 +1,17 @@
+# Lab / Quick Test - Fast upgrade with minimal safety checks
+# Skips health checks, MD5 verification, and backups for speed.
+# Do NOT use this in production.
+#
+# Usage:
+#   python iosxe_upgrade.py --config configs/lab_quick.yml
+#   python iosxe_upgrade.py --config configs/lab_quick.yml --host 10.10.77.4
+
+hosts: switches.txt
+image: ciscosoftware/cat9k_iosxe.17.15.05.SPA.bin
+full: true
+
+no_confirm: true
+skip_backup: true
+skip_md5: true
+skip_health_check: true
+timeout: 600

@@ -1,0 +1,17 @@
+# Activate Only - Trigger the upgrade (causes reload)
+# Use this during a maintenance window after prestage + transfer are done.
+# Runs sequentially with a delay between switches for controlled rollout.
+#
+# Usage:
+#   python iosxe_upgrade.py --config configs/activate_only.yml
+#   python iosxe_upgrade.py --config configs/activate_only.yml --delay 60
+
+hosts: switches.txt
+image: ciscosoftware/cat9k_iosxe.17.15.05.SPA.bin
+activate: true
+
+verify_upgrade: true
+auto_rollback: true
+verify_wait: 1200
+delay: 30
+output: results_activate.json
