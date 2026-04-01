@@ -7,7 +7,7 @@
 #   python iosxe_upgrade.py --config configs/activate_only.yml --delay 60
 
 hosts: switches.txt
-image: ciscosoftware/cat9k_iosxe.17.15.05.SPA.bin
+image_map: configs/image_map.yml
 activate: true
 
 verify_upgrade: true

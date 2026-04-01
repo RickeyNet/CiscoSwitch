@@ -7,7 +7,7 @@
 #   python iosxe_upgrade.py --config configs/lab_quick.yml --host 10.10.77.4
 
 hosts: switches.txt
-image: ciscosoftware/cat9k_iosxe.17.15.05.SPA.bin
+image_map: configs/image_map.yml
 full: true
 
 no_confirm: true

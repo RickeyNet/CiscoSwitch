@@ -7,7 +7,7 @@
 #   python iosxe_upgrade.py --config configs/full_production.yml --hosts other_switches.txt
 
 hosts: switches.txt
-image: ciscosoftware/cat9k_iosxe.17.15.05.SPA.bin
+image_map: configs/image_map.yml
 full: true
 
 parallel: 10
